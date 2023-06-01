@@ -1,17 +1,20 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const mongoose = require('mongoose');
+require('dotenv').config();
+const express = require("express");
+const bodyParser = require("body-parser");
+const mongoose = require("mongoose");
+const bcrypt = require("bcrypt");
+const saltRounds = 10;
 
 const app = express();
 app.use(bodyParser.json());
 
 // Connect to MongoDB
 mongoose
-  .connect('mongodb+srv://miganson2:oSfIivO2ioli5Sm9@cluster0.ewmbdwr.mongodb.net/mydatabase', {
+  .connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
-  .then(() => console.log('MongoDB Connected...'))
+  .then(() => console.log("MongoDB Connected..."))
   .catch((err) => console.log(err));
 
 // Define a User schema
@@ -21,24 +24,63 @@ const userSchema = new mongoose.Schema({
 });
 
 // Create a User model
-const User = mongoose.model('User', userSchema);
+const User = mongoose.model("User", userSchema);
 
-// Login route
-app.post('/login', (req, res) => {
+app.post("/signup", (req, res) => {
   const { username, password } = req.body;
 
-  // Find the user with the provided username and password
-  User.findOne({ username, password }, (err, user) => {
-    if (err) {
-      return res.status(500).json({ message: 'Internal server error' });
+  // Check if the username already exists
+  User.findOne({ username }).then((existingUser) => {
+    if (existingUser) {
+      return res.status(409).json({ message: "Username already exists" });
     }
 
-    if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+    // Hash the password and create a new user
+    bcrypt.hash(password, saltRounds, (err, hashedPassword) => {
+      if (err) {
+        return res.status(500).json({ message: "Internal server error" });
+      }
 
-    return res.json({ message: 'Login successful', user });
+      const newUser = new User({ username, password: hashedPassword });
+      return newUser
+        .save()
+        .then((savedUser) => {
+          return res
+            .status(201)
+            .json({ message: "Signup successful", user: savedUser });
+        })
+        .catch((err) => {
+          return res.status(500).json({ message: "Internal server error" });
+        });
+    });
   });
+});
+
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+
+  User.findOne({ username })
+    .then((user) => {
+      if (!user) {
+        return res.status(401).json({ message: "Invalid credentials" });
+      }
+
+      // Compare the provided password with the stored hashed password
+      bcrypt.compare(password, user.password, (err, result) => {
+        if (err) {
+          return res.status(500).json({ message: "Internal server error" });
+        }
+
+        if (result) {
+          return res.json({ message: "Login successful", user });
+        } else {
+          return res.status(401).json({ message: "Invalid credentials" });
+        }
+      });
+    })
+    .catch((err) => {
+      return res.status(500).json({ message: "Internal server error" });
+    });
 });
 
 // Start the server
